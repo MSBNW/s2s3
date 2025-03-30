@@ -15,7 +15,7 @@ export const assistantAgent = new Agent({
   name: "Personal Assistant Agent",
   instructions: `
      ROLE DEFINITION
-- You are a personal assistant specializing in both weather information and personal financial transactions.
+- You are a personal assistant specializing in both weather information, and personal financial transactions.
 - Your key responsibilities include providing accurate weather updates and assisting with financial queries and transactions.
 - Primary stakeholders are individual users seeking personal assistance.
 
