@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Voice Agent UI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .conversation {
+            height: 300px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #4a6fa5;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 18px;
+            margin: 5px 0;
+            max-width: 80%;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .agent-message {
+            background-color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 18px;
+            margin: 5px 0;
+            max-width: 80%;
+        }
+        #log {
+            height: 100px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+            font-size: 12px;
+            display: none; /* Hidden by default, can be shown for debugging */
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Voice Agent UI</h1>
+    
+    <div class="container">
+        <div class="status" id="status">Status: Ready</div>
+        
+        <div id="log"></div>
+        
+        <div class="conversation" id="conversation">
+            <!-- Messages will appear here -->
+        </div>
+        
+        <div class="controls">
+            <button id="start-btn">Start Conversation</button>
+            <button id="stop-btn" disabled>Stop Conversation</button>
+        </div>
+    </div>
+    
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script>
+        // DOM Elements
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const statusDiv = document.getElementById('status');
+        const conversationDiv = document.getElementById('conversation');
+        const logDiv = document.getElementById('log');
+        
+        // Variables
+        let socket;
+        let mediaRecorder;
+        let audioContext;
+        let mediaStream;
+        let isRecording = false;
+        
+        // Log function
+        function log(message) {
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        // Update status
+        function updateStatus(message) {
+            statusDiv.textContent = `Status: ${message}`;
+            log(`Status: ${message}`);
+        }
+        
+        // Add message to conversation
+        function addMessage(text, role) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add(role === 'user' ? 'user-message' : 'agent-message');
+            messageDiv.textContent = text;
+            conversationDiv.appendChild(messageDiv);
+            conversationDiv.scrollTop = conversationDiv.scrollHeight;
+        }
+        
+        // Initialize socket
+        function initializeSocket() {
+            log('Initializing socket...');
+            
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            
+            socket.on('connect', () => {
+                updateStatus(`Connected (${socket.id})`);
+                log('Socket connected: ' + socket.id);
+            });
+            
+            socket.on('connect_error', (error) => {
+                updateStatus(`Connection error: ${error.message}`);
+                log('Connection error: ' + error.message);
+            });
+            
+            socket.on('disconnect', () => {
+                updateStatus('Disconnected');
+                log('Socket disconnected');
+            });
+            
+            socket.on('transcription', (data) => {
+                log('Transcription received: ' + JSON.stringify(data));
+                addMessage(data.text, data.role);
+            });
+            
+            socket.on('audio', (data) => {
+                log('Audio received');
+                playAudio(data.buffer);
+            });
+            
+            socket.on('error', (data) => {
+                updateStatus(`Error: ${data.message}`);
+                log('Server error: ' + data.message);
+            });
+        }
+        
+        // Initialize audio
+        async function initializeAudio() {
+            try {
+                log('Creating audio context...');
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                log('Requesting microphone access...');
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+                log('Microphone access granted');
+                
+                // Try different MIME types
+                const mimeTypes = [
+                    'audio/webm',
+                    'audio/webm;codecs=opus',
+                    'audio/ogg;codecs=opus',
+                    'audio/mp4'
+                ];
+                
+                let options = {};
+                
+                // Find a supported MIME type
+                for (const type of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        log(`Using MIME type: ${type}`);
+                        options = { mimeType: type };
+                        break;
+                    }
+                }
+                
+                log('Creating MediaRecorder...');
+                mediaRecorder = new MediaRecorder(mediaStream, options);
+                log('MediaRecorder created successfully');
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        log(`Received ${event.data.size} bytes of audio data`);
+                        
+                        // Convert to base64 and send to server
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64data = reader.result.split(',')[1];
+                            if (socket && socket.connected) {
+                                socket.emit('audioData', { buffer: base64data });
+                                log('Sent audio data to server');
+                            }
+                        };
+                        reader.readAsDataURL(event.data);
+                    }
+                };
+                
+                return true;
+            } catch (error) {
+                log('Error initializing audio: ' + error.message);
+                updateStatus(`Microphone error: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Play audio
+        async function playAudio(base64Audio) {
+            try {
+                log('Decoding audio data...');
+                const binaryString = atob(base64Audio);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+                log('Audio data decoded successfully');
+                
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                log('Playing audio...');
+                source.start(0);
+            } catch (error) {
+                log('Error playing audio: ' + error.message);
+            }
+        }
+        
+        // Start recording
+        function startRecording() {
+            try {
+                if (!mediaRecorder) {
+                    log('MediaRecorder not initialized');
+                    return;
+                }
+                
+                if (isRecording) {
+                    log('Already recording, ignoring start request');
+                    return;
+                }
+                
+                log('Starting MediaRecorder...');
+                mediaRecorder.start(100); // Collect data every 100ms
+                log('MediaRecorder started successfully');
+                
+                isRecording = true;
+                updateStatus('Recording...');
+                
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                
+                // Tell the server to start the conversation
+                socket.emit('startConversation');
+                log('Sent startConversation event to server');
+            } catch (error) {
+                log('Error starting recording: ' + error.message);
+                updateStatus(`Error: ${error.message}`);
+                
+                // Reset state
+                isRecording = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+        
+        // Stop recording
+        function stopRecording() {
+            try {
+                log('Stopping recording...');
+                
+                if (!mediaRecorder) {
+                    log('MediaRecorder not initialized');
+                    return;
+                }
+                
+                if (!isRecording) {
+                    log('Not recording, ignoring stop request');
+                    return;
+                }
+                
+                mediaRecorder.stop();
+                isRecording = false;
+                updateStatus('Stopped');
+                
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                
+                // Stop the media stream
+                if (mediaStream) {
+                    log('Stopping media tracks...');
+                    mediaStream.getTracks().forEach(track => track.stop());
+                    mediaStream = null;
+                    mediaRecorder = null; // Reset mediaRecorder to force re-initialization
+                }
+                
+                // Disconnect socket
+                if (socket) {
+                    log('Disconnecting socket...');
+                    socket.disconnect();
+                }
+            } catch (error) {
+                log('Error stopping recording: ' + error.message);
+                updateStatus(`Error: ${error.message}`);
+                
+                // Reset state
+                isRecording = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+        
+        // Event listeners
+        startBtn.addEventListener('click', async () => {
+            log('Start button clicked');
+            
+            // Initialize socket if not already
+            if (!socket) {
+                initializeSocket();
+            } else if (!socket.connected) {
+                log('Reconnecting socket...');
+                socket.connect();
+            }
+            
+            // Initialize audio if not already
+            if (!mediaRecorder) {
+                log('Initializing audio...');
+                const initialized = await initializeAudio();
+                if (!initialized) return;
+            }
+            
+            startRecording();
+        });
+        
+        stopBtn.addEventListener('click', () => {
+            log('Stop button clicked');
+            stopRecording();
+        });
+    </script>
+</body>
+</html>

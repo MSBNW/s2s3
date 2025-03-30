@@ -6,7 +6,6 @@ import { AnswerRelevancyMetric } from "@mastra/evals/llm";
 import { OpenAIRealtimeVoice } from "@mastra/voice-openai-realtime";
 import 'dotenv/config';
 
-
 const model = openai("gpt-4o-mini");
 
 const metric = new AnswerRelevancyMetric(model, {
@@ -47,8 +46,11 @@ SUCCESS CRITERIA
 `,
   model: openai("gpt-4o"),
   voice: new OpenAIRealtimeVoice({
-    apiKey: process.env.OPENAI_API_KEY
-  }) as any,
+    apiKey: process.env.OPENAI_API_KEY,
+    model: 'gpt-4o-mini',  // Use a model that's definitely available
+    speaker: 'alloy',
+    debug: true  // Enable debug mode to get more information
+  }) as any, // Type assertion to work around version compatibility issues
   tools: { weatherTool, getTransactionsTool },
   evals: { metric },
   memory: new Memory({}),

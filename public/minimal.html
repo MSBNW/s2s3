@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Socket.IO Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #log {
+            height: 300px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Minimal Socket.IO Test</h1>
+    
+    <div id="log"></div>
+    
+    <button id="connect-btn">Connect</button>
+    <button id="disconnect-btn">Disconnect</button>
+    <button id="ping-btn">Send Ping</button>
+    
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script>
+        // DOM Elements
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const pingBtn = document.getElementById('ping-btn');
+        const logDiv = document.getElementById('log');
+        
+        // Variables
+        let socket;
+        
+        // Log function
+        function log(message) {
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        // Connect
+        connectBtn.addEventListener('click', () => {
+            log('Connecting...');
+            
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            
+            socket.on('connect', () => {
+                log(`Connected with ID: ${socket.id}`);
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`Connection error: ${error.message}`);
+            });
+            
+            socket.on('disconnect', (reason) => {
+                log(`Disconnected: ${reason}`);
+            });
+            
+            socket.on('pong', (data) => {
+                log(`Received pong: ${JSON.stringify(data)}`);
+            });
+        });
+        
+        // Disconnect
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.disconnect();
+                log('Manually disconnected');
+            } else {
+                log('No socket to disconnect');
+            }
+        });
+        
+        // Send ping
+        pingBtn.addEventListener('click', () => {
+            if (socket && socket.connected) {
+                const pingData = { timestamp: Date.now() };
+                socket.emit('ping', pingData);
+                log(`Sent ping: ${JSON.stringify(pingData)}`);
+            } else {
+                log('Socket not connected, cannot send ping');
+            }
+        });
+    </script>
+</body>
+</html>

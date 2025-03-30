@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Recording Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #log {
+            height: 200px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Audio Recording Test</h1>
+    
+    <div id="status">Status: Ready</div>
+    <div id="log"></div>
+    
+    <button id="start-btn">Start Recording</button>
+    <button id="stop-btn" disabled>Stop Recording</button>
+    <button id="play-btn" disabled>Play Recording</button>
+    
+    <script>
+        // DOM Elements
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const playBtn = document.getElementById('play-btn');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        
+        // Variables
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+        let audioUrl;
+        let audio = new Audio();
+        
+        // Log function
+        function log(message) {
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        // Update status
+        function updateStatus(message) {
+            statusDiv.textContent = `Status: ${message}`;
+            log(`Status: ${message}`);
+        }
+        
+        // Initialize audio
+        async function initializeAudio() {
+            try {
+                log('Requesting microphone access...');
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+                log('Microphone access granted');
+                
+                // Try different MIME types
+                const mimeTypes = [
+                    'audio/webm',
+                    'audio/webm;codecs=opus',
+                    'audio/ogg;codecs=opus',
+                    'audio/mp4'
+                ];
+                
+                let options = {};
+                
+                // Find a supported MIME type
+                for (const type of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        log(`Using MIME type: ${type}`);
+                        options = { mimeType: type };
+                        break;
+                    }
+                }
+                
+                // Create MediaRecorder
+                mediaRecorder = new MediaRecorder(stream, options);
+                log('MediaRecorder created successfully');
+                
+                // Set up event handlers
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                        log(`Received ${event.data.size} bytes of audio data`);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    log('MediaRecorder stopped');
+                    audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    audioUrl = URL.createObjectURL(audioBlob);
+                    audio.src = audioUrl;
+                    playBtn.disabled = false;
+                    log(`Created audio blob: ${audioBlob.size} bytes`);
+                };
+                
+                return true;
+            } catch (error) {
+                log(`Error initializing audio: ${error.message}`);
+                updateStatus(`Error: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Start recording
+        function startRecording() {
+            audioChunks = [];
+            try {
+                log('Starting MediaRecorder...');
+                mediaRecorder.start(100);
+                log('MediaRecorder started successfully');
+                updateStatus('Recording');
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                playBtn.disabled = true;
+            } catch (error) {
+                log(`Error starting MediaRecorder: ${error.message}`);
+                updateStatus(`Error: ${error.message}`);
+            }
+        }
+        
+        // Stop recording
+        function stopRecording() {
+            try {
+                mediaRecorder.stop();
+                updateStatus('Stopped');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            } catch (error) {
+                log(`Error stopping MediaRecorder: ${error.message}`);
+                updateStatus(`Error: ${error.message}`);
+            }
+        }
+        
+        // Play recording
+        function playRecording() {
+            try {
+                log('Playing recorded audio');
+                audio.play();
+                updateStatus('Playing');
+                
+                audio.onended = () => {
+                    updateStatus('Stopped');
+                    log('Playback ended');
+                };
+            } catch (error) {
+                log(`Error playing audio: ${error.message}`);
+                updateStatus(`Error: ${error.message}`);
+            }
+        }
+        
+        // Event listeners
+        startBtn.addEventListener('click', async () => {
+            if (!mediaRecorder) {
+                const initialized = await initializeAudio();
+                if (!initialized) return;
+            }
+            startRecording();
+        });
+        
+        stopBtn.addEventListener('click', () => {
+            stopRecording();
+        });
+        
+        playBtn.addEventListener('click', () => {
+            playRecording();
+        });
+    </script>
+</body>
+</html>

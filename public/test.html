@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0069d9;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Socket.IO Connection Test</h1>
+    
+    <div id="status" class="disconnected">Disconnected</div>
+    
+    <button id="connect-btn">Connect</button>
+    <button id="disconnect-btn" disabled>Disconnect</button>
+    <button id="send-btn" disabled>Send Test Message</button>
+    
+    <div id="log"></div>
+    
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script>
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const logDiv = document.getElementById('log');
+        
+        let socket;
+        
+        function updateStatus(status, message) {
+            statusDiv.className = status;
+            statusDiv.textContent = message;
+        }
+        
+        function log(message) {
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        connectBtn.addEventListener('click', () => {
+            updateStatus('connecting', 'Connecting...');
+            log('Attempting to connect...');
+            
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            
+            socket.on('connect', () => {
+                updateStatus('connected', 'Connected');
+                log(`Connected with ID: ${socket.id}`);
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`Connection error: ${error.message}`);
+                updateStatus('disconnected', `Connection error: ${error.message}`);
+            });
+            
+            socket.on('disconnect', (reason) => {
+                log(`Disconnected: ${reason}`);
+                updateStatus('disconnected', `Disconnected: ${reason}`);
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+            });
+            
+            socket.on('message', (data) => {
+                log(`Received message: ${JSON.stringify(data)}`);
+            });
+        });
+        
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.disconnect();
+                log('Manually disconnected');
+            }
+        });
+        
+        sendBtn.addEventListener('click', () => {
+            if (socket && socket.connected) {
+                const testMessage = { text: 'Hello from client', timestamp: Date.now() };
+                socket.emit('testMessage', testMessage);
+                log(`Sent test message: ${JSON.stringify(testMessage)}`);
+            }
+        });
+    </script>
+</body>
+</html>

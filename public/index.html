@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Agent UI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Voice Agent</h1>
+            <p>Talk with your Mastra voice assistant</p>
+        </header>
+
+        <main>
+            <div class="conversation-container">
+                <div id="conversation" class="conversation">
+                    <!-- Conversation messages will appear here -->
+                </div>
+            </div>
+
+            <div class="controls">
+                <div class="status-indicator">
+                    <div id="status-light" class="status-light"></div>
+                    <span id="status-text">Ready</span>
+                </div>
+                
+                <div class="buttons">
+                    <button id="start-btn" class="btn primary-btn">Start Conversation</button>
+                    <button id="mute-btn" class="btn secondary-btn" disabled>Mute Microphone</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Mastra Voice-to-Voice</p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const startBtn = document.getElementById('start-btn');
+            const muteBtn = document.getElementById('mute-btn');
+            const statusLight = document.getElementById('status-light');
+            const statusText = document.getElementById('status-text');
+            const conversation = document.getElementById('conversation');
+
+            // Audio context and processing variables
+            let audioContext;
+            let mediaStream;
+            let mediaRecorder;
+            let audioChunks = [];
+            let isRecording = false;
+            let isMuted = false;
+            let socket;
+            let audioQueue = [];
+            let isPlaying = false;
+
+            // Initialize socket connection
+            function initializeSocket() {
+                console.log('Initializing socket connection...');
+                
+                // Initialize socket with the same configuration that worked in the test page
+                socket = io({
+                    transports: ['websocket', 'polling'],
+                    reconnectionAttempts: 5,
+                    reconnectionDelay: 1000
+                });
+                
+                console.log('Socket object created');
+
+                socket.on('connect', () => {
+                    updateStatus('ready', 'Connected');
+                    console.log('Connected to server', socket.id);
+                });
+
+                socket.on('connect_error', (error) => {
+                    console.error('Connection error:', error);
+                    updateStatus('error', 'Connection error');
+                });
+
+                socket.on('disconnect', () => {
+                    updateStatus('error', 'Disconnected');
+                    console.log('Disconnected from server');
+                });
+
+                socket.on('transcription', (data) => {
+                    addMessage(data.text, data.role);
+                });
+
+                socket.on('audio', (data) => {
+                    // Convert base64 to ArrayBuffer
+                    const binaryString = atob(data.buffer);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    // Add to audio queue
+                    audioQueue.push(bytes.buffer);
+                    
+                    // Start playing if not already playing
+                    if (!isPlaying) {
+                        playNextAudio();
+                    }
+                });
+
+                socket.on('agentFinishedSpeaking', () => {
+                    updateStatus('listening', 'Listening');
+                });
+
+                socket.on('error', (data) => {
+                    console.error('Server error:', data.message);
+                    updateStatus('error', 'Error: ' + data.message);
+                });
+            }
+
+            // Initialize audio context and request microphone access
+            async function initializeAudio() {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    console.log('Requesting microphone access...');
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        } 
+                    });
+                    console.log('Microphone access granted');
+                    
+                    // Try different MIME types
+                    const mimeTypes = [
+                        'audio/webm',
+                        'audio/webm;codecs=opus',
+                        'audio/ogg;codecs=opus',
+                        'audio/mp4'
+                    ];
+                    
+                    let options = {};
+                    
+                    // Find a supported MIME type
+                    for (const type of mimeTypes) {
+                        if (MediaRecorder.isTypeSupported(type)) {
+                            console.log(`Using MIME type: ${type}`);
+                            options = { mimeType: type };
+                            break;
+                        }
+                    }
+                    
+                    console.log('Creating MediaRecorder...');
+                    mediaRecorder = new MediaRecorder(mediaStream, options);
+                    console.log('MediaRecorder created successfully');
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && !isMuted) {
+                            audioChunks.push(event.data);
+                            
+                            // Convert to base64 and send to server
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                const base64data = reader.result.split(',')[1];
+                                if (socket && socket.connected) {
+                                    socket.emit('audioData', { buffer: base64data });
+                                }
+                            };
+                            reader.readAsDataURL(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.onstop = () => {
+                        audioChunks = [];
+                    };
+                    
+                    return true;
+                } catch (error) {
+                    console.error('Error initializing audio:', error);
+                    updateStatus('error', 'Microphone access denied');
+                    return false;
+                }
+            }
+
+            // Start recording audio
+            function startRecording() {
+                try {
+                    if (!mediaRecorder) {
+                        console.log('MediaRecorder not initialized');
+                        return;
+                    }
+                    
+                    if (isRecording) {
+                        console.log('Already recording, ignoring start request');
+                        return;
+                    }
+                    
+                    console.log('Starting MediaRecorder...');
+                    audioChunks = [];
+                    mediaRecorder.start(100); // Collect data every 100ms
+                    console.log('MediaRecorder started successfully');
+                    
+                    isRecording = true;
+                    updateStatus('listening', 'Listening');
+                    
+                    // Enable mute button
+                    muteBtn.disabled = false;
+                    
+                    // Change start button to stop
+                    startBtn.textContent = 'End Conversation';
+                    
+                    // Tell the server to start the conversation
+                    socket.emit('startConversation');
+                } catch (error) {
+                    console.error('Error starting MediaRecorder:', error);
+                    updateStatus('error', 'Error starting microphone');
+                    
+                    // Reset state
+                    isRecording = false;
+                    startBtn.disabled = false;
+                    muteBtn.disabled = true;
+                }
+            }
+
+            // Stop recording audio
+            function stopRecording() {
+                try {
+                    if (!mediaRecorder) {
+                        console.log('MediaRecorder not initialized');
+                        return;
+                    }
+                    
+                    if (!isRecording) {
+                        console.log('Not recording, ignoring stop request');
+                        return;
+                    }
+                    
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    updateStatus('ready', 'Ready');
+                    
+                    // Disable mute button
+                    muteBtn.disabled = true;
+                    isMuted = false;
+                    muteBtn.textContent = 'Mute Microphone';
+                    
+                    // Change stop button back to start
+                    startBtn.textContent = 'Start Conversation';
+                    
+                    // Close the socket connection
+                    if (socket) {
+                        socket.disconnect();
+                    }
+                    
+                    // Stop the media stream
+                    if (mediaStream) {
+                        mediaStream.getTracks().forEach(track => track.stop());
+                        mediaStream = null;
+                        mediaRecorder = null; // Reset mediaRecorder to force re-initialization
+                    }
+                } catch (error) {
+                    console.error('Error stopping recording:', error);
+                    
+                    // Reset state
+                    isRecording = false;
+                    startBtn.disabled = false;
+                    muteBtn.disabled = true;
+                    startBtn.textContent = 'Start Conversation';
+                }
+            }
+
+            // Toggle mute
+            function toggleMute() {
+                isMuted = !isMuted;
+                muteBtn.textContent = isMuted ? 'Unmute Microphone' : 'Mute Microphone';
+            }
+
+            // Play audio from the agent
+            async function playNextAudio() {
+                if (audioQueue.length === 0) {
+                    isPlaying = false;
+                    return;
+                }
+                
+                isPlaying = true;
+                updateStatus('speaking', 'Agent Speaking');
+                
+                const audioBuffer = audioQueue.shift();
+                
+                try {
+                    // Decode the audio data
+                    const decodedData = await audioContext.decodeAudioData(audioBuffer);
+                    
+                    // Create a buffer source
+                    const source = audioContext.createBufferSource();
+                    source.buffer = decodedData;
+                    source.connect(audioContext.destination);
+                    
+                    // Play the audio
+                    source.start(0);
+                    
+                    // When finished, play the next audio in queue
+                    source.onended = () => {
+                        playNextAudio();
+                    };
+                } catch (error) {
+                    console.error('Error playing audio:', error);
+                    playNextAudio(); // Skip to next audio
+                }
+            }
+
+            // Add a message to the conversation
+            function addMessage(text, role) {
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message');
+                messageDiv.classList.add(role === 'user' ? 'user-message' : 'agent-message');
+                messageDiv.textContent = text;
+                
+                conversation.appendChild(messageDiv);
+                
+                // Scroll to bottom
+                conversation.scrollTop = conversation.scrollHeight;
+            }
+
+            // Update the status indicator
+            function updateStatus(state, message) {
+                statusLight.className = 'status-light';
+                statusLight.classList.add(state);
+                statusText.textContent = message;
+            }
+
+            // Event listeners
+            startBtn.addEventListener('click', async () => {
+                console.log('Start button clicked');
+                if (!isRecording) {
+                    // Initialize if first time
+                    if (!socket) {
+                        console.log('No socket, initializing...');
+                        initializeSocket();
+                    } else if (!socket.connected) {
+                        console.log('Reconnecting existing socket...');
+                        socket.connect();
+                    }
+                    
+                    if (!mediaRecorder) {
+                        const initialized = await initializeAudio();
+                        if (!initialized) return;
+                    }
+                    
+                    startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+
+            muteBtn.addEventListener('click', toggleMute);
+
+            // Initial status
+            updateStatus('ready', 'Ready');
+        });
+    </script>
+</body>
+</html>
