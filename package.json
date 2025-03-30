@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "mastra dev"
+    "dev": "mastra dev",
+    "voice": "tsx src/start-voice-agent.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,7 +17,12 @@
     "@mastra/core": "^0.6.4",
     "@mastra/evals": "^0.1.13",
     "@mastra/memory": "^0.2.5",
+    "@mastra/node-speaker": "^0.1.0",
+    "@mastra/voice-openai-realtime": "^0.1.0",
+    "chalk": "^5.4.1",
+    "dotenv": "^16.4.7",
     "mastra": "^0.4.3",
+    "node-mic": "^1.0.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

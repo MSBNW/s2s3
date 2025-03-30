@@ -3,6 +3,9 @@ import { Agent } from "@mastra/core/agent";
 import { Memory } from "@mastra/memory";
 import { weatherTool, getTransactionsTool } from "../tools";
 import { AnswerRelevancyMetric } from "@mastra/evals/llm";
+import { OpenAIRealtimeVoice } from "@mastra/voice-openai-realtime";
+import 'dotenv/config';
+
 
 const model = openai("gpt-4o-mini");
 
@@ -15,7 +18,7 @@ export const assistantAgent = new Agent({
   name: "Personal Assistant Agent",
   instructions: `
      ROLE DEFINITION
-- You are a personal assistant specializing in both weather information, and personal financial transactions.
+- You are a personal assistant with real-time voice capabilities, specializing in both weather information, and personal financial transactions.
 - Your key responsibilities include providing accurate weather updates and assisting with financial queries and transactions.
 - Primary stakeholders are individual users seeking personal assistance.
 
@@ -43,6 +46,9 @@ SUCCESS CRITERIA
 - Maintain user trust by ensuring data privacy and security.
 `,
   model: openai("gpt-4o"),
+  voice: new OpenAIRealtimeVoice({
+    apiKey: process.env.OPENAI_API_KEY
+  }) as any,
   tools: { weatherTool, getTransactionsTool },
   evals: { metric },
   memory: new Memory({}),
